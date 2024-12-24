@@ -2,15 +2,18 @@
 import React, {createContext, useState} from 'react';
 
 export const ModelContext = createContext({
-  model: 'gpt-3.5-turbo',
-  setModel: (model: string) => {},
+  gptModel: 'gpt-3.5-turbo',
+  setGptModel: (model: string) => {},
+  whisperModel: 'base',
+  setWhisperModel: (wm: string) => {},
 });
 
 export const ModelProvider = ({children}: any) => {
-  const [model, setModel] = useState('gpt-3.5-turbo');
+  const [gptModel, setGptModel] = useState('gpt-3.5-turbo');
+  const [whisperModel, setWhisperModel] = useState('base');
 
   return (
-    <ModelContext.Provider value={{model, setModel}}>
+    <ModelContext.Provider value={{gptModel, setGptModel, whisperModel, setWhisperModel}}>
       {children}
     </ModelContext.Provider>
   );

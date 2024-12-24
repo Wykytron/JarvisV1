@@ -2,7 +2,6 @@ import React, {useState, useEffect, useContext} from 'react';
 import {
   View,
   PermissionsAndroid,
-  Alert,
   StyleSheet,
   TouchableOpacity,
   TextInput,
@@ -10,10 +9,13 @@ import {
   Text,
   Image,
 } from 'react-native';
+import {NavigationContainer} from '@react-navigation/native';
+import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import Tts from 'react-native-tts';
 import AudioRecord from 'react-native-audio-record';
 import axios from 'axios';
+
 import {
   launchCamera,
   launchImageLibrary,
@@ -22,20 +24,17 @@ import {
   ImageLibraryOptions,
 } from 'react-native-image-picker';
 
-import {NavigationContainer} from '@react-navigation/native';
-import {createNativeStackNavigator} from '@react-navigation/native-stack';
-
-// Settings screen & model context
 import SettingsScreen from './screens/SettingsScreen';
 import {ModelProvider, ModelContext} from './ModelContext';
 
-// Update to match your LAN IP + port
-const BACKEND_URL = 'http://192.168.0.189:8000/api/chat';
+// Adjust these URLs to match your environment:
+const BACKEND_TRANSCRIBE_URL = 'http://192.168.0.189:8000/api/transcribe';
+const BACKEND_CHAT_URL = 'http://192.168.0.189:8000/api/chat';
 
 const Stack = createNativeStackNavigator();
 
 function HomeScreen({navigation}: any) {
-  const {model} = useContext(ModelContext); // read chosen model from context
+  const {gptModel, whisperModel} = useContext(ModelContext);
 
   const [messages, setMessages] = useState<any[]>([]);
   const [recording, setRecording] = useState(false);
@@ -86,13 +85,31 @@ function HomeScreen({navigation}: any) {
   };
 
   const stopRecording = async () => {
-    const file = await AudioRecord.stop();
+    const filePath = await AudioRecord.stop();
     setRecording(false);
-    setAudioFile(file);
-    Alert.alert('Recording saved', `File: ${file}`);
+    setAudioFile(filePath);
+
+    // Transcribe with whisper (no popups)
+    try {
+      const formData = new FormData();
+      formData.append('whisper_model', whisperModel);
+      formData.append('file', {
+        uri: 'file://' + filePath,
+        name: 'audio.wav',
+        type: 'audio/wav',
+      });
+
+      const resp = await axios.post(BACKEND_TRANSCRIBE_URL, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const transcript = resp.data.transcript || '';
+      setTextMessage(transcript);
+    } catch (error) {
+      console.log('Transcribe error:', error);
+    }
   };
 
-  //===== SPEAKER (TTS) TOGGLE =====
+  //===== SPEAKER (TTS) =====
   const toggleSpeaker = () => {
     setSpeakerOn(prev => !prev);
   };
@@ -101,7 +118,7 @@ function HomeScreen({navigation}: any) {
   const sendTextMessage = async () => {
     if (!textMessage.trim()) return;
 
-    // Show user message in chat
+    // User message
     const userMsg = {
       id: Date.now().toString(),
       role: 'user',
@@ -110,21 +127,23 @@ function HomeScreen({navigation}: any) {
     };
     setMessages(prev => [...prev, userMsg]);
 
-    // Prepare form data (model + text)
+    // Prepare form data
     const formData = new FormData();
-    formData.append('model', model);
+    formData.append('model', gptModel);
     formData.append('message', textMessage.trim());
 
-    // Clear text field
     setTextMessage('');
 
     try {
-      const resp = await axios.post(BACKEND_URL, formData, {
-        headers: {'Content-Type': 'multipart/form-data'},
+      const resp = await axios.post(BACKEND_CHAT_URL, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       const reply = resp.data.response || '(No response)';
 
-      // Create app message
+      if (speakerOn) {
+        Tts.speak(reply);
+      }
+
       const appMsg = {
         id: `${Date.now()}-app`,
         role: 'app',
@@ -132,20 +151,13 @@ function HomeScreen({navigation}: any) {
         content: reply,
       };
       setMessages(prev => [...prev, appMsg]);
-
-      // **READ OUT** the LLM response if speaker is on
-      if (speakerOn) {
-        Tts.speak(reply);
-      }
     } catch (error) {
       console.log('Error sending message:', error);
-      Alert.alert('Error', 'Failed to send message to backend');
     }
   };
 
-  //===== SEND IMAGE MESSAGE =====
+  //===== SEND IMAGE =====
   const sendMessageWithImage = async (imageUri: string, text?: string) => {
-    // Show user message with image
     const userMsg = {
       id: Date.now().toString(),
       role: 'user',
@@ -154,9 +166,8 @@ function HomeScreen({navigation}: any) {
     };
     setMessages(prev => [...prev, userMsg]);
 
-    // Prepare form data (model + optional text + file)
     const formData = new FormData();
-    formData.append('model', model);
+    formData.append('model', gptModel);
     if (text && text.trim()) {
       formData.append('message', text.trim());
     }
@@ -167,12 +178,15 @@ function HomeScreen({navigation}: any) {
     });
 
     try {
-      const resp = await axios.post(BACKEND_URL, formData, {
-        headers: {'Content-Type': 'multipart/form-data'},
+      const resp = await axios.post(BACKEND_CHAT_URL, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       const reply = resp.data.response || '(No response)';
 
-      // Create app message
+      if (speakerOn) {
+        Tts.speak(reply);
+      }
+
       const appMsg = {
         id: `${Date.now()}-app`,
         role: 'app',
@@ -180,30 +194,23 @@ function HomeScreen({navigation}: any) {
         content: reply,
       };
       setMessages(prev => [...prev, appMsg]);
-
-      // **READ OUT** the LLM response if speaker is on
-      if (speakerOn) {
-        Tts.speak(reply);
-      }
     } catch (error) {
       console.log('Error sending image:', error);
-      Alert.alert('Error', 'Failed to send image to backend');
     }
   };
 
   //===== CAMERA / GALLERY =====
   const onCameraButtonPress = () => {
-    Alert.alert('Select Image Source', '', [
-      {text: 'Camera', onPress: handleTakePhoto},
-      {text: 'Gallery', onPress: handleChooseFromGallery},
-      {text: 'Cancel', style: 'cancel'},
-    ]);
+    // No popup, just do an alert or direct calls if you want
+    // We'll show a small approach:
+    // Direct calls without alert:
+    handleTakePhoto();
   };
 
   const handleTakePhoto = async () => {
     const hasCam = await requestCameraPermission();
     if (!hasCam) {
-      Alert.alert('Camera permission denied');
+      console.log('Camera permission denied');
       return;
     }
     const options: CameraOptions = {
@@ -247,8 +254,7 @@ function HomeScreen({navigation}: any) {
         </View>
       );
     }
-
-    // Text bubble
+    // text
     return (
       <View style={bubbleStyle}>
         <Text style={textStyle}>{item.content}</Text>
@@ -266,12 +272,13 @@ function HomeScreen({navigation}: any) {
         style={styles.chatList}
       />
 
-      {/* Buttons Row: Settings - Camera - Speaker - Mic */}
+      {/* Buttons Row */}
       <View style={styles.buttonsRow}>
         {/* Settings */}
         <TouchableOpacity
           style={styles.iconButton}
-          onPress={() => navigation.navigate('Settings')}>
+          onPress={() => navigation.navigate('Settings')}
+        >
           <MaterialCommunityIcons name="cog-outline" size={30} color="#fff" />
         </TouchableOpacity>
 
@@ -297,11 +304,11 @@ function HomeScreen({navigation}: any) {
         </TouchableOpacity>
       </View>
 
-      {/* Bottom: Text Input + Send */}
+      {/* Bottom row: Text Input + Send */}
       <View style={styles.inputRow}>
         <TextInput
           style={styles.textInput}
-          placeholder="Type message..."
+          placeholder="Type or speak message..."
           value={textMessage}
           onChangeText={setTextMessage}
         />
@@ -332,7 +339,6 @@ function App() {
 
 export default App;
 
-//===== STYLES =====
 const styles = StyleSheet.create({
   container: {
     flex: 1,

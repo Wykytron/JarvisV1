@@ -4,11 +4,44 @@ import os
 from dotenv import load_dotenv
 import openai
 from langchain.chat_models import ChatOpenAI
+import uuid
+import tempfile
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+import whisper
+import subprocess
 app = FastAPI()
+
+model = whisper.load_model("base")  # or "small", "medium", "large"
+
+@app.post("/api/transcribe")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    whisper_model: str = Form("base")
+):
+    # read file content
+    audio_bytes = await file.read()
+
+    # get system temp folder (Windows might be C:\Users\You\AppData\Local\Temp)
+    temp_dir = tempfile.gettempdir()
+    temp_id = str(uuid.uuid4())
+    temp_path = os.path.join(temp_dir, f"{temp_id}.wav")
+
+    with open(temp_path, "wb") as f:
+        f.write(audio_bytes)
+
+    # ... load whisper, transcribe, etc. ...
+    # Example:
+    import whisper
+    model = whisper.load_model(whisper_model)
+    result = model.transcribe(temp_path)
+
+    # cleanup
+    os.remove(temp_path)
+
+    return {"transcript": result["text"]}
 
 @app.post("/api/chat")
 async def chat_endpoint(
