@@ -12,7 +12,7 @@ import {
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import Tts from 'react-native-tts';
+import Tts from 'react-native-tts';       // TTS library
 import AudioRecord from 'react-native-audio-record';
 import axios from 'axios';
 
@@ -27,13 +27,15 @@ import {
 import SettingsScreen from './screens/SettingsScreen';
 import {ModelProvider, ModelContext} from './ModelContext';
 
-// Adjust these URLs to match your environment:
+// Point these at your server
 const BACKEND_TRANSCRIBE_URL = 'http://192.168.0.189:8000/api/transcribe';
 const BACKEND_CHAT_URL = 'http://192.168.0.189:8000/api/chat';
 
 const Stack = createNativeStackNavigator();
 
 function HomeScreen({navigation}: any) {
+  // We'll store user model choices in a context, e.g. gptModel or whisperModel
+  // If you have a ModelContext with gptModel / whisperModel, use them:
   const {gptModel, whisperModel} = useContext(ModelContext);
 
   const [messages, setMessages] = useState<any[]>([]);
@@ -72,7 +74,7 @@ function HomeScreen({navigation}: any) {
     return granted === PermissionsAndroid.RESULTS.GRANTED;
   }
 
-  //===== MICROPHONE =====
+  //===== MICROPHONE / RECORDING =====
   const startRecording = async () => {
     await requestPermissions();
     AudioRecord.init({
@@ -89,7 +91,7 @@ function HomeScreen({navigation}: any) {
     setRecording(false);
     setAudioFile(filePath);
 
-    // Transcribe with whisper (no popups)
+    // Transcribe with Whisper
     try {
       const formData = new FormData();
       formData.append('whisper_model', whisperModel);
@@ -109,16 +111,16 @@ function HomeScreen({navigation}: any) {
     }
   };
 
-  //===== SPEAKER (TTS) =====
+  //===== SPEAKER TOGGLE =====
   const toggleSpeaker = () => {
     setSpeakerOn(prev => !prev);
   };
 
-  //===== SEND TEXT MESSAGE =====
+  //===== SEND TEXT MESSAGE (to GPT) =====
   const sendTextMessage = async () => {
     if (!textMessage.trim()) return;
 
-    // User message
+    // Show user message in chat
     const userMsg = {
       id: Date.now().toString(),
       role: 'user',
@@ -127,11 +129,12 @@ function HomeScreen({navigation}: any) {
     };
     setMessages(prev => [...prev, userMsg]);
 
-    // Prepare form data
+    // Prepare form data for /api/chat
     const formData = new FormData();
     formData.append('model', gptModel);
     formData.append('message', textMessage.trim());
 
+    // Clear text
     setTextMessage('');
 
     try {
@@ -140,10 +143,12 @@ function HomeScreen({navigation}: any) {
       });
       const reply = resp.data.response || '(No response)';
 
+      // If speaker is on, read out the reply
       if (speakerOn) {
         Tts.speak(reply);
       }
 
+      // Show LLM reply in chat
       const appMsg = {
         id: `${Date.now()}-app`,
         role: 'app',
@@ -153,6 +158,43 @@ function HomeScreen({navigation}: any) {
       setMessages(prev => [...prev, appMsg]);
     } catch (error) {
       console.log('Error sending message:', error);
+    }
+  };
+
+  //===== CAMERA / GALLERY FOR IMAGES =====
+  const onCameraButtonPress = () => {
+    handleTakePhoto();
+  };
+
+  const handleTakePhoto = async () => {
+    const hasCam = await requestCameraPermission();
+    if (!hasCam) {
+      console.log('Camera permission denied');
+      return;
+    }
+    const options: CameraOptions = {
+      mediaType: 'photo',
+      saveToPhotos: true,
+    };
+    const result = await launchCamera(options);
+    if (!result.didCancel && !result.errorCode && result.assets?.length) {
+      const asset: Asset = result.assets[0];
+      if (asset.uri) {
+        await sendMessageWithImage(asset.uri);
+      }
+    }
+  };
+
+  const handleChooseFromGallery = async () => {
+    const options: ImageLibraryOptions = {
+      mediaType: 'photo',
+    };
+    const result = await launchImageLibrary(options);
+    if (!result.didCancel && !result.errorCode && result.assets?.length) {
+      const asset: Asset = result.assets[0];
+      if (asset.uri) {
+        await sendMessageWithImage(asset.uri);
+      }
     }
   };
 
@@ -199,47 +241,7 @@ function HomeScreen({navigation}: any) {
     }
   };
 
-  //===== CAMERA / GALLERY =====
-  const onCameraButtonPress = () => {
-    // No popup, just do an alert or direct calls if you want
-    // We'll show a small approach:
-    // Direct calls without alert:
-    handleTakePhoto();
-  };
-
-  const handleTakePhoto = async () => {
-    const hasCam = await requestCameraPermission();
-    if (!hasCam) {
-      console.log('Camera permission denied');
-      return;
-    }
-    const options: CameraOptions = {
-      mediaType: 'photo',
-      saveToPhotos: true,
-    };
-    const result = await launchCamera(options);
-    if (!result.didCancel && !result.errorCode && result.assets?.length) {
-      const asset: Asset = result.assets[0];
-      if (asset.uri) {
-        await sendMessageWithImage(asset.uri);
-      }
-    }
-  };
-
-  const handleChooseFromGallery = async () => {
-    const options: ImageLibraryOptions = {
-      mediaType: 'photo',
-    };
-    const result = await launchImageLibrary(options);
-    if (!result.didCancel && !result.errorCode && result.assets?.length) {
-      const asset: Asset = result.assets[0];
-      if (asset.uri) {
-        await sendMessageWithImage(asset.uri);
-      }
-    }
-  };
-
-  //===== RENDER MESSAGES =====
+  //===== RENDER MESSAGES IN CHAT =====
   const renderMessage = ({item}: {item: any}) => {
     const isUser = item.role === 'user';
     const bubbleStyle = isUser
@@ -254,7 +256,6 @@ function HomeScreen({navigation}: any) {
         </View>
       );
     }
-    // text
     return (
       <View style={bubbleStyle}>
         <Text style={textStyle}>{item.content}</Text>
@@ -272,7 +273,6 @@ function HomeScreen({navigation}: any) {
         style={styles.chatList}
       />
 
-      {/* Buttons Row */}
       <View style={styles.buttonsRow}>
         {/* Settings */}
         <TouchableOpacity
@@ -304,7 +304,6 @@ function HomeScreen({navigation}: any) {
         </TouchableOpacity>
       </View>
 
-      {/* Bottom row: Text Input + Send */}
       <View style={styles.inputRow}>
         <TextInput
           style={styles.textInput}
@@ -339,6 +338,7 @@ function App() {
 
 export default App;
 
+//===== STYLES =====
 const styles = StyleSheet.create({
   container: {
     flex: 1,

@@ -1,4 +1,4 @@
-// screens/SettingsScreen.tsx
+// SettingsScreen.tsx
 import React, {useContext} from 'react';
 import {View, Text, StyleSheet} from 'react-native';
 import {Picker} from '@react-native-picker/picker';
@@ -11,6 +11,7 @@ export default function SettingsScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>Settings</Text>
 
+      {/* GPT Model Picker */}
       <Text style={styles.label}>Select GPT Model:</Text>
       <Picker
         selectedValue={gptModel}
@@ -22,6 +23,7 @@ export default function SettingsScreen() {
         <Picker.Item label="GPT-4" value="gpt-4" />
       </Picker>
 
+      {/* Whisper Model Picker */}
       <Text style={styles.label}>Select Whisper Model:</Text>
       <Picker
         selectedValue={whisperModel}
